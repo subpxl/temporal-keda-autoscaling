@@ -1,0 +1,5 @@
+# config.yaml
+temporal:
+  address: "temporal-dev:7233"
+  taskQueue: "default-activity-queue"
+  workflowName: "FourActivityWorkflow"

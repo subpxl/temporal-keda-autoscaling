@@ -1,0 +1,126 @@
+version: '3'
+
+vars:
+  CLUSTER_NAME: keda-demo-cluster
+  NAMESPACE: keda-temporal
+
+tasks:
+  # 🧹 Clean + recreate cluster
+  clean:
+    desc: Delete and recreate the Kind cluster, reinstall KEDA, RabbitMQ, Temporal, API, Worker
+    cmds:
+      - echo "🧹 Deleting existing Kind cluster..."
+      - kind delete cluster --name {{.CLUSTER_NAME}} || true
+      - echo "🚀 Creating new Kind cluster..."
+      - kind create cluster --name {{.CLUSTER_NAME}}
+      - echo "📦 Creating namespace..."
+      - kubectl create namespace {{.NAMESPACE}}
+      - echo "📥 Installing KEDA..."
+      - helm repo add kedacore https://kedacore.github.io/charts
+      - helm repo update
+      - helm install keda kedacore/keda --namespace {{.NAMESPACE}}
+      - echo "🐇 Applying RabbitMQ..."
+      - kubectl apply -f keda/rabbitmq.yaml
+      - echo "🧠 Building and loading Temporal image..."
+      - task: build:temporal
+      - echo "🔧 Building and loading Go API image..."
+      - task: build:goapi
+      - echo "⚙️ Building and loading Worker image..."
+      - task: build:worker
+      - echo "📈 Applying KEDA ScaledObject..."
+      - kubectl apply -f keda/temporal-worker-scaledobject.yaml
+      - echo "✅ Setup complete!"
+      - kubectl get pods -n {{.NAMESPACE}}
+
+
+  # Build + load all components
+  keda:
+    desc: install keda
+    cmds:
+      - task: helm repo add kedacore https://kedacore.github.io/charts
+      - task: helm repo update
+      - task: helm install keda kedacore/keda --namespace  {{.NAMESPACE}}
+
+  #  Build + load all components
+  rabbitmq:
+    desc: install rabbitmq
+    cmds:
+      - task:  kubectl apply -f keda/rabbitmq.yaml
+
+
+  #  Build + load all components
+  so:
+    desc: scaledobject
+    cmds:
+      - task:   kubectl apply -f keda/temporal-worker-scaledobject.yaml
+
+
+
+  #  Build + load all components
+  build:all:
+    desc: Build all Docker images and load them into Kind
+    cmds:
+      # - task: build:temporal
+      - task: build:goapi
+      - task: build:worker
+
+  # 🔧 Individual build targets
+  build:temporal:
+    desc: Build and load Temporal service image
+    cmds:
+      - docker build -t temporal-dev:latest ./temporal
+      - kind load docker-image temporal-dev:latest --name {{.CLUSTER_NAME}}
+      - kubectl apply -f temporal/temporal-deployment.yaml
+
+  build:goapi:
+    desc: Build and load Temporal Go API image
+    cmds:
+      - docker build -t temporal-go-api:latest ./go-api
+      - kind load docker-image temporal-go-api:latest --name {{.CLUSTER_NAME}}
+      - kubectl apply -f go-api/go-api-deployment.yaml
+
+  build:worker:
+    desc: Build and load Temporal Worker image
+    cmds:
+      - docker build -t temporal-worker:latest ./worker
+      - kind load docker-image temporal-worker:latest --name {{.CLUSTER_NAME}}
+      - kubectl rollout restart deployment temporal-worker -n keda-temporal
+      - kubectl apply -f worker/worker-deployment.yaml
+
+
+
+  # 🔌 Port forwarding all services
+  port:
+    desc: Port forward all core services in background
+    cmds:
+      - |
+        echo "🔌 Port forwarding Temporal UI (http://localhost:30000)..."
+        kubectl port-forward -n {{.NAMESPACE}} svc/temporal-ui 30000:8233 > /dev/null 2>&1 &
+        echo "🔌 Port forwarding Go API (http://localhost:18080/health)..."
+        kubectl port-forward -n {{.NAMESPACE}} svc/temporal-go-api 18080:8080 > /dev/null 2>&1 &
+        echo "🔌 Port forwarding RabbitMQ (http://localhost:15672)..."
+        kubectl port-forward -n {{.NAMESPACE}} svc/my-rabbitmq 15672:15672 > /dev/null 2>&1 &
+        echo "🔌 Port forwarding Metrics (http://localhost:30001/metrics)..."
+        kubectl port-forward -n {{.NAMESPACE}} svc/temporal-metrics 30001:9100 > /dev/null 2>&1 &
+        echo "✅ All port-forwards running in background."
+
+  # 🧪 Verify health
+  check:
+    desc: Check pod and service status
+    cmds:
+      - kubectl get pods -n {{.NAMESPACE}}
+      - echo ""
+      - echo "🌐 Test API health endpoint → curl http://localhost:18080/health"
+
+  # 🧩 Watch autoscaling
+  watch:hpa:
+    desc: Watch Horizontal Pod Autoscaler for Temporal worker
+    cmds:
+      - kubectl get hpa -n {{.NAMESPACE}} -w
+
+  # 🚀 Bring everything up (clean + port forward)
+  up:
+    desc: Full setup and port forwarding
+    cmds:
+      - task: clean
+      - task: port

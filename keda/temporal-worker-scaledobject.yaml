@@ -1,0 +1,54 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: temporal-worker-scaled
+  namespace: keda-temporal
+spec:
+  scaleTargetRef:
+    name: temporal-worker
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  cooldownPeriod: 60
+  pollingInterval: 15
+  triggers:
+    - type: temporal
+      metadata:
+        namespace: default
+        queueTypes: workflow # optional
+        taskQueue: "sample-task-queue"
+        targetQueueSize: "1"
+        activationTargetQueueSize: "0"
+        endpoint: temporal-dev.keda-temporal.svc.cluster.local:7233
+        tls: "disable"
+
+    # - type: temporal
+    #   metadata:
+    #     namespace: default
+    #     queueTypes: activity # optional
+    #     taskQueue: "sample-task-activity"
+    #     targetQueueSize: "1"
+    #     activationTargetQueueSize: "0"
+    #     endpoint: temporal-dev.keda-temporal.svc.cluster.local:7233
+    #     tls: "disable"
+
+    # Trigger 2: RabbitMQ queue
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: test-queue
+        queueLength: "5"
+      authenticationRef:
+        name: rabbitmq-auth
+
+   
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: rabbitmq-auth
+  namespace: keda-temporal
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: rabbitmq-conn-secret
+      key: RABBITMQ_CONN_STR

@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-go-api
+  namespace: keda-temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-go-api
+  template:
+    metadata:
+      labels:
+        app: temporal-go-api
+    spec:
+      containers:
+        - name: temporal-go-api
+          image: temporal-go-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-dev.keda-temporal.svc.cluster.local:7233"
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: temporal-go-api
+  namespace: keda-temporal
+spec:
+  type: NodePort
+  selector:
+    app: temporal-go-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 31000
